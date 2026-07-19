@@ -1,8 +1,8 @@
 # Bounded Agent Actions — Reference Implementation
 
 CC0 reference implementation of the Bounded Agent Actions ERC; canonical spec at
-[ethereum/ERCs](https://github.com/ethereum/ERCs) (PR link to be added).
-Discussion: [Ethereum Magicians](https://ethereum-magicians.org) (thread link to be added).
+[ethereum/ERCs PR #1833](https://github.com/ethereum/ERCs/pull/1833) (ERC-8312).
+Discussion: [Ethereum Magicians thread 28851](https://ethereum-magicians.org/t/erc-bounded-agent-actions-a-metering-layer-for-agent-authority/28851).
 
 This repository is the reference implementation only. The normative specification
 lives in ethereum/ERCs; this code exists to show the interface is implementable and
@@ -17,7 +17,12 @@ the Budget Substrate Profile interoperable.
 | `src/IContestableEnvelope.sol` | Optional contestation extension |
 | `src/EnvelopeRegistry.sol` | Reference registry implementing the Budget Substrate Profile |
 | `src/IERC165.sol` | Vendored ERC-165 interface (keeps this dependency-free) |
+| `src/IAggregateBudget.sol` | Optional aggregate-budget companion profile: one conserved cap across a delegation tree ([profile notes](AGGREGATE-BUDGET-PROFILE.md)) |
+| `src/AggregateBudgetCursor.sol` | Reference implementation of the aggregate-budget profile |
 | `test/EnvelopeRegistry.t.sol` | Conformance suite |
+| `test/AggregateBudgetConformance.t.sol` | Aggregate-profile conformance suite (interface-typed; portable to other implementations) |
+| `test/AggregateBudgetCursor.t.sol` | Aggregate reference unit tests, including the per-edge amplification counterexample |
+| `test/AggregateBudgetCursor.invariant.t.sol` | Stateful conservation invariant over randomised delegation trees |
 
 ## Scope
 
@@ -36,6 +41,7 @@ no production substrate: no proof system, no execution kernel, no credit logic.
 | `IBoundedAgentAction` | `0x3985961d` |
 | `IBudgetSubstrate` | `0x021ca455` |
 | `IContestableEnvelope` | `0xe664d441` |
+| `IAggregateBudget` | `0xc7cabe86` |
 
 ## Build and test
 
