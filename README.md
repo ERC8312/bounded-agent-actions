@@ -23,11 +23,14 @@ the Budget Substrate Profile interoperable.
 | `test/AggregateBudgetConformance.t.sol` | Aggregate-profile conformance suite (interface-typed; portable to other implementations) |
 | `test/AggregateBudgetCursor.t.sol` | Aggregate reference unit tests, including the per-edge amplification counterexample |
 | `test/AggregateBudgetCursor.invariant.t.sol` | Stateful conservation invariant over randomised delegation trees |
+| `recompute/` | Scripts checking a published invariant against live chain state, proven from storage rather than from a view ([notes](recompute/README.md)) |
 
 ## Scope
 
 This is a deliberately minimal budget substrate. The cursor is a running spend
-counter and the witness is an ECDSA authorization bound to `(id, prevCursor)`.
+counter and the witness is an ECDSA authorization bound to `(id, prevCursor)` —
+one of the replay bindings Section 2.3 permits. The spec also admits binding to
+a per-draw nonce; live implementations use both forms.
 
 It **meters but does not enforce**: it binds no assets and gates no execution path,
 so it is not non-bypassable by the principal's own key. Per the ERC, non-bypassability
