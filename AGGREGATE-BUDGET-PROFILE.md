@@ -98,9 +98,14 @@ A conformant implementation:
 - **Non-bypassability is a substrate obligation.** Like the base profile, a
   conformant meter must sit on the sole path to asset movement; this interface
   meters and does not itself move assets or gate execution.
-- **No reserve/refund.** Draws are final within a period. A liveness extension
-  (reserving headroom so an in-flight action does not strand budget) is out of
-  scope for this minimal safety profile.
+- **No reserve/refund.** Draws are final within a period, and revocation never
+  decrements the meter. Reserving headroom so an in-flight action does not
+  strand budget, and crediting authority back when value genuinely returns, are
+  both out of scope for this minimal safety profile — they are specified in the
+  companion [Reservation and Reversal Profile](RESERVATION-PROFILE.md), whose
+  reference implementation passes the vectors below unmodified. An
+  implementation of this profile alone **MUST NOT** be described as supporting
+  authorize-now-settle-later.
 
 ## Relation to prior aggregate-authority mechanisms
 

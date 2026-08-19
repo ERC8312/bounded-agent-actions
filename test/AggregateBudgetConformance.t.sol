@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IAggregateBudget} from "../src/IAggregateBudget.sol";
 import {IERC165} from "../src/IERC165.sol";
 import {AggregateBudgetCursor} from "../src/AggregateBudgetCursor.sol";
+import {ReservingBudgetCursor} from "../src/ReservingBudgetCursor.sol";
 
 /// @notice Conformance suite for the IAggregateBudget profile. Every test drives
 ///         the implementation THROUGH THE INTERFACE TYPE, so the suite validates
@@ -14,7 +15,7 @@ import {AggregateBudgetCursor} from "../src/AggregateBudgetCursor.sol";
 ///         without refund, and ERC-165 advertisement.
 ///
 ///         To conformance-test a different implementation, change `deploy()`.
-contract AggregateBudgetConformanceTest is Test {
+abstract contract AggregateBudgetConformanceBase is Test {
     IAggregateBudget internal agg;
 
     address internal issuer = makeAddr("issuer");
@@ -26,7 +27,7 @@ contract AggregateBudgetConformanceTest is Test {
     uint256 internal constant CAP = 100_000e6;
     bytes32 internal rootId;
 
-    function deploy() internal returns (IAggregateBudget) {
+    function deploy() internal virtual returns (IAggregateBudget) {
         return new AggregateBudgetCursor();
     }
 
@@ -175,5 +176,18 @@ contract AggregateBudgetConformanceTest is Test {
         assertEq(nodeCap, 5_000e6);
         assertTrue(agg.isPathActive(rootId, node));
         assertEq(agg.currentPeriod(rootId), 0);
+    }
+}
+
+
+/// @notice The vendored reference, conformance-tested.
+contract AggregateBudgetConformanceTest is AggregateBudgetConformanceBase {}
+
+/// @notice The reservation/reversal extension against the SAME normative
+///         vectors. Evidence that the companion profile is additive rather than
+///         a fork of the base semantics.
+contract ReservingCursorConformanceTest is AggregateBudgetConformanceBase {
+    function deploy() internal override returns (IAggregateBudget) {
+        return new ReservingBudgetCursor();
     }
 }
