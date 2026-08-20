@@ -12,7 +12,8 @@ import {IBoundedAgentAction} from "./IBoundedAgentAction.sol";
 ///         rejects advanceCursor on any stored status other than Active, so
 ///         entering Contested halts advancement and isActive reads false for the
 ///         duration. An informational review signal therefore MUST NOT ride on
-///         lifecycle status — anything in the enum inherits the freeze.
+///         lifecycle status, since any stored status other than Active suspends
+///         advancement.
 interface IContestableEnvelope is IBoundedAgentAction {
     event EnvelopeContested(bytes32 indexed id, address indexed challenger);
     event EnvelopeResolved(bytes32 indexed id, Status outcome);
@@ -24,20 +25,24 @@ interface IContestableEnvelope is IBoundedAgentAction {
 
     /// @notice Contested -> Active or Contested -> Revoked. MUST be restricted to a
     ///         documented resolver until `resolutionDeadline` has passed, after
-    ///         which any caller MAY resolve to the documented default. MUST revert
-    ///         unless status is Contested and `outcome` is Active or Revoked.
+    ///         which any caller MAY resolve, with `outcome` restricted to Active.
+    ///         MUST revert unless status is Contested and `outcome` is Active or
+    ///         Revoked.
     function resolve(bytes32 id, Status outcome, bytes calldata resolution) external;
 
     /// @notice The instant from which any caller MAY resolve `id`. MUST be set when
-    ///         `contest` succeeds and MUST NOT be extended thereafter. MUST revert
+    ///         `contest` succeeds and MUST NOT be extended while that contest is
+    ///         pending; a subsequent contest sets a fresh deadline. MUST revert
     ///         unless status is Contested.
     /// @dev    An envelope with expiresAt == 0 has no clock of its own, so without
     ///         this a silent resolver leaves it suspended forever and the CHALLENGER
-    ///         decides how long the bound stays frozen. The default outcome after
-    ///         the deadline is Active: the stall is the challenger's, so an
-    ///         unresolved contest returns the envelope to service. Not Expired —
-    ///         that state is terminal, so an any-caller edge into it would let a
-    ///         metered party contest its own envelope and run out the clock to
-    ///         foreclose the verdict.
+    ///         decides how long the bound stays frozen. The outcome after the
+    ///         deadline is Active, not a choosable default: the stall is the
+    ///         challenger's, so an unresolved contest returns the envelope to
+    ///         service. The window MUST be fixed and documented before any contest
+    ///         is raised, since one that never arrives in practice is no exit.
+    ///         Not Expired, since that state is terminal and an any-caller edge
+    ///         into it would let a metered party contest its own envelope and run
+    ///         out the clock to foreclose the verdict.
     function resolutionDeadline(bytes32 id) external view returns (uint64);
 }
