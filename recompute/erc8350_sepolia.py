@@ -13,8 +13,8 @@ WHAT THIS PROVES
     3. the chain is gapless: sequence == prev + 1, and
        prevStateRoot == the prior transition's nextStateRoot, from sequence 1
        with prevStateRoot == 0;
-    4. the head materialized in contract STORAGE — all three fields the spec's
-       head() exposes: transitionId, stateRoot, sequence — equals the head
+    4. the head materialized in contract STORAGE â€” all three fields the spec's
+       head() exposes: transitionId, stateRoot, sequence â€” equals the head
        recomputed by replaying the event path.
 
   (4) is the point. (1)-(3) check the itemized path; (4) checks that the slots
@@ -51,7 +51,7 @@ USAGE
     python3 erc8350_sepolia.py --cross-check-rpc URL2
 
   Exit 0 only when at least one Space was found and every Space verified.
-  Anything else — mismatch, no transitions, unsupported proof shape — is
+  Anything else â€” mismatch, no transitions, unsupported proof shape â€” is
   nonzero. Needs an endpoint that serves eth_getLogs over the full range and
   eth_getProof at the chosen block.
 
@@ -65,7 +65,7 @@ LIMITATIONS, STATED PLAINLY
 
   * The trie walker is minimal. It handles branch, extension and leaf nodes
     referenced by hash, validates hex-prefix flags and padding, and RAISES on
-    anything else — including inlined (<32 byte) node references — rather than
+    anything else â€” including inlined (<32 byte) node references â€” rather than
     guessing. An unsupported proof shape is an error, never a silent pass.
   * The header reconstruction covers the post-merge field set through the
     Prague fork. A future fork that appends header fields will fail the hash
@@ -78,18 +78,19 @@ LIMITATIONS, STATED PLAINLY
   * Spaces are enumerated from TransitionCommitted logs. A Space registered
     but never advanced has no transitions to check and does not appear.
   * This checks the state machine. It says nothing about whether committed
-    memory is available, truthful, or meaningful — ERC-8350 is explicit about
+    memory is available, truthful, or meaningful â€” ERC-8350 is explicit about
     those being out of scope.
 
 Companion to the ERC-8312 reference implementation in this repository. That
 code implements meterable invariants in Solidity; this script is what checking
-such an invariant from outside looks like — here applied to ERC-8350's public
+such an invariant from outside looks like â€” here applied to ERC-8350's public
 deployment, whose transition rule is the same shape one layer up.
 """
 
 import argparse
 import json
 import sys
+import time
 import urllib.request
 
 try:
@@ -125,7 +126,7 @@ def k256(data: bytes) -> bytes:
 EXPERIENCE_DELTA_TYPEHASH = k256(EXPERIENCE_DELTA_TYPE)
 MEMORY_STATE_TYPEHASH = k256(MEMORY_STATE_TYPE)
 
-# keccak256(rlp(b"")) — the root of an empty trie.
+# keccak256(rlp(b"")) â€” the root of an empty trie.
 EMPTY_TRIE_ROOT = bytes.fromhex(
     "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
@@ -215,7 +216,7 @@ def verify_proof(root: bytes, key: bytes, proof) -> bytes:
 
     Returns the RLP-encoded value stored at the key, or b"" if the key is
     proven absent. Raises ValueError on any malformed, unsupported, or
-    non-matching proof — never guesses.
+    non-matching proof â€” never guesses.
     """
     path = _nibbles(k256(key))
     depth = 0
@@ -299,6 +300,7 @@ _HEADER_OPTIONAL = [
     ("baseFeePerGas", int), ("withdrawalsRoot", bytes),
     ("blobGasUsed", int), ("excessBlobGas", int),
     ("parentBeaconBlockRoot", bytes), ("requestsHash", bytes),
+    ("blockAccessListHash", bytes), ("slotNumber", int),
 ]
 
 
@@ -332,7 +334,7 @@ def verify_header(block: dict):
     if computed != reported:
         raise ValueError(
             f"header reconstruction mismatch: computed {hexs(computed)}, "
-            f"endpoint reports {hexs(reported)} — lying endpoint or a header "
+            f"endpoint reports {hexs(reported)} â€” lying endpoint or a header "
             f"shape newer than this script")
     return reported, bytes.fromhex(block["stateRoot"][2:])
 
@@ -353,13 +355,18 @@ class Rpc:
             {"Content-Type": "application/json",
              # some public gateways reject urllib's default user agent
              "User-Agent": "erc8350-recompute/1.0"})
-        try:
-            response = json.load(urllib.request.urlopen(request, timeout=90))
-        except json.JSONDecodeError:
-            raise RuntimeError(
-                f"{method}: endpoint returned non-JSON (rate limited?)") from None
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"{method}: endpoint unreachable ({exc})") from None
+        for attempt in range(5):
+            try:
+                response = json.load(urllib.request.urlopen(request, timeout=90))
+                break
+            except json.JSONDecodeError:
+                raise RuntimeError(
+                    f"{method}: endpoint returned non-JSON (rate limited?)") from None
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+                if attempt == 4:
+                    raise RuntimeError(
+                        f"{method}: endpoint unreachable ({exc})") from None
+                time.sleep(2 ** attempt)
         if "error" in response:
             raise RuntimeError(f"{method}: {response['error']}")
         if "result" not in response:
@@ -368,10 +375,19 @@ class Rpc:
 
 
 # ----------------------------------------------------------------------- main
-def collect_spaces(rpc, registry):
-    logs = rpc("eth_getLogs", [{"address": registry,
-                                "topics": [TRANSITION_COMMITTED_TOPIC],
-                                "fromBlock": "0x0", "toBlock": "latest"}])
+def collect_spaces(rpc, registry, from_block=0, log_range=45000):
+    latest = int(rpc("eth_blockNumber", []), 16)
+    logs = []
+    start = from_block
+    while start <= latest:
+        end = min(start + log_range - 1, latest)
+        logs.extend(rpc("eth_getLogs", [{
+            "address": registry,
+            "topics": [TRANSITION_COMMITTED_TOPIC],
+            "fromBlock": hex(start),
+            "toBlock": hex(end),
+        }]))
+        start = end + 1
     spaces = {}
     for log in logs:
         data = bytes.fromhex(log["data"][2:])
@@ -430,7 +446,7 @@ def prove_head(rpc, registry, space_id, block, state_root, base_slot):
     Every returned value comes from this side's walk of the submitted proof
     nodes: the requested slot list is authoritative, each response entry's key
     must equal the requested slot, and the walked value must equal the value
-    the endpoint reported — any disagreement raises.
+    the endpoint reported â€” any disagreement raises.
     """
     base = int.from_bytes(k256(word(space_id) + word(base_slot)), "big")
     names = ["controller", "authorizer", "transitionId", "stateRoot", "seqNonce"]
@@ -486,6 +502,10 @@ def main():
                     help="observation block; default is head minus 12")
     ap.add_argument("--base-slot", type=int, default=0,
                     help="declaration slot of the _spaces mapping (default: 0)")
+    ap.add_argument("--from-block", type=int, default=0,
+                    help="first block to scan for TransitionCommitted logs")
+    ap.add_argument("--log-range", type=int, default=45000,
+                    help="max blocks per eth_getLogs call (public RPCs cap at 50000)")
     ap.add_argument("--cross-check-rpc", default=None,
                     help="second endpoint that must report the same block hash "
                          "and state root")
@@ -494,7 +514,7 @@ def main():
     rpc = Rpc(args.rpc_url)
     registry = args.registry
 
-    log_count, spaces = collect_spaces(rpc, registry)
+    log_count, spaces = collect_spaces(rpc, registry, args.from_block, args.log_range)
     print(f"registry            {registry}")
     print(f"TransitionCommitted {log_count} logs across {len(spaces)} Memory Spaces")
 
