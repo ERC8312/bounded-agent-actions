@@ -52,8 +52,8 @@ USAGE
 
   Exit 0 only when at least one Space was found and every Space verified.
   Anything else — mismatch, no transitions, unsupported proof shape — is
-  nonzero. Needs an endpoint that serves eth_getLogs over the full range and
-  eth_getProof at the chosen block.
+  nonzero. Needs an endpoint that serves eth_getLogs (scanned in --log-range
+  chunks, so a per-call range cap is fine) and eth_getProof at the chosen block.
 
   The observation block is an observation point, not part of the claim. Most
   endpoints serve eth_getProof only within a recent window, so --block with an
@@ -68,7 +68,8 @@ LIMITATIONS, STATED PLAINLY
     anything else — including inlined (<32 byte) node references — rather than
     guessing. An unsupported proof shape is an error, never a silent pass.
   * The header reconstruction covers the post-merge field set through the
-    Prague fork. A future fork that appends header fields will fail the hash
+    Prague fork, plus blockAccessListHash and slotNumber as Sepolia now serves
+    them. A future fork that appends header fields will fail the hash
     check until the field list here is extended; that failure is loud.
   * Storage slot layout is taken from the reference AgentMemoryStateRegistry:
     `_spaces` at slot 0, SpaceRecord = {controller, authorizer, transitionId,
@@ -90,6 +91,7 @@ deployment, whose transition rule is the same shape one layer up.
 import argparse
 import json
 import sys
+import time
 import urllib.request
 
 try:
@@ -286,8 +288,9 @@ def verify_slot(storage_root: bytes, slot: int, slot_proof) -> int:
 
 
 # ----------------------------------------------------------------- block header
-# Execution-layer header fields, post-merge through Prague. Optional fields are
-# appended in fork order; presence is taken from the RPC response.
+# Execution-layer header fields, post-merge through Prague, then
+# blockAccessListHash and slotNumber. Optional fields are appended in fork
+# order; presence is taken from the RPC response.
 _HEADER_REQUIRED = [
     ("parentHash", bytes), ("sha3Uncles", bytes), ("miner", bytes),
     ("stateRoot", bytes), ("transactionsRoot", bytes), ("receiptsRoot", bytes),
@@ -299,6 +302,7 @@ _HEADER_OPTIONAL = [
     ("baseFeePerGas", int), ("withdrawalsRoot", bytes),
     ("blobGasUsed", int), ("excessBlobGas", int),
     ("parentBeaconBlockRoot", bytes), ("requestsHash", bytes),
+    ("blockAccessListHash", bytes), ("slotNumber", int),
 ]
 
 
@@ -353,13 +357,18 @@ class Rpc:
             {"Content-Type": "application/json",
              # some public gateways reject urllib's default user agent
              "User-Agent": "erc8350-recompute/1.0"})
-        try:
-            response = json.load(urllib.request.urlopen(request, timeout=90))
-        except json.JSONDecodeError:
-            raise RuntimeError(
-                f"{method}: endpoint returned non-JSON (rate limited?)") from None
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"{method}: endpoint unreachable ({exc})") from None
+        for attempt in range(5):
+            try:
+                response = json.load(urllib.request.urlopen(request, timeout=90))
+                break
+            except json.JSONDecodeError:
+                raise RuntimeError(
+                    f"{method}: endpoint returned non-JSON (rate limited?)") from None
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+                if attempt == 4:
+                    raise RuntimeError(
+                        f"{method}: endpoint unreachable ({exc})") from None
+                time.sleep(2 ** attempt)
         if "error" in response:
             raise RuntimeError(f"{method}: {response['error']}")
         if "result" not in response:
@@ -368,10 +377,22 @@ class Rpc:
 
 
 # ----------------------------------------------------------------------- main
-def collect_spaces(rpc, registry):
-    logs = rpc("eth_getLogs", [{"address": registry,
-                                "topics": [TRANSITION_COMMITTED_TOPIC],
-                                "fromBlock": "0x0", "toBlock": "latest"}])
+def collect_spaces(rpc, registry, from_block=0, log_range=45000, to_block=None):
+    latest = int(rpc("eth_blockNumber", []), 16)
+    upper = latest if to_block is None else min(to_block, latest)
+    if from_block > upper:
+        return 0, {}
+    logs = []
+    start = from_block
+    while start <= upper:
+        end = min(start + log_range - 1, upper)
+        logs.extend(rpc("eth_getLogs", [{
+            "address": registry,
+            "topics": [TRANSITION_COMMITTED_TOPIC],
+            "fromBlock": hex(start),
+            "toBlock": hex(end),
+        }]))
+        start = end + 1
     spaces = {}
     for log in logs:
         data = bytes.fromhex(log["data"][2:])
@@ -486,20 +507,31 @@ def main():
                     help="observation block; default is head minus 12")
     ap.add_argument("--base-slot", type=int, default=0,
                     help="declaration slot of the _spaces mapping (default: 0)")
+    ap.add_argument("--from-block", type=int, default=0,
+                    help="first block to scan for TransitionCommitted logs")
+    ap.add_argument("--log-range", type=int, default=45000,
+                    help="max blocks per eth_getLogs call (public RPCs cap at 50000)")
     ap.add_argument("--cross-check-rpc", default=None,
                     help="second endpoint that must report the same block hash "
                          "and state root")
     args = ap.parse_args()
+    if args.log_range <= 0:
+        ap.error("--log-range must be a positive integer")
+    if args.from_block < 0:
+        ap.error("--from-block must be >= 0")
+    if args.block is not None and args.block < 0:
+        ap.error("--block must be >= 0")
 
     rpc = Rpc(args.rpc_url)
     registry = args.registry
 
-    log_count, spaces = collect_spaces(rpc, registry)
+    block_number = args.block if args.block is not None else \
+        int(rpc("eth_blockNumber", []), 16) - 12
+    log_count, spaces = collect_spaces(
+        rpc, registry, args.from_block, args.log_range, block_number)
     print(f"registry            {registry}")
     print(f"TransitionCommitted {log_count} logs across {len(spaces)} Memory Spaces")
 
-    block_number = args.block if args.block is not None else \
-        int(rpc("eth_blockNumber", []), 16) - 12
     block = rpc("eth_getBlockByNumber", [hex(block_number), False])
     if block is None:
         print(f"block {block_number} not available from this endpoint")
