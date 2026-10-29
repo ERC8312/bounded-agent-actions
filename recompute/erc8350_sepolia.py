@@ -13,8 +13,8 @@ WHAT THIS PROVES
     3. the chain is gapless: sequence == prev + 1, and
        prevStateRoot == the prior transition's nextStateRoot, from sequence 1
        with prevStateRoot == 0;
-    4. the head materialized in contract STORAGE â€” all three fields the spec's
-       head() exposes: transitionId, stateRoot, sequence â€” equals the head
+    4. the head materialized in contract STORAGE — all three fields the spec's
+       head() exposes: transitionId, stateRoot, sequence — equals the head
        recomputed by replaying the event path.
 
   (4) is the point. (1)-(3) check the itemized path; (4) checks that the slots
@@ -51,9 +51,9 @@ USAGE
     python3 erc8350_sepolia.py --cross-check-rpc URL2
 
   Exit 0 only when at least one Space was found and every Space verified.
-  Anything else â€” mismatch, no transitions, unsupported proof shape â€” is
-  nonzero. Needs an endpoint that serves eth_getLogs over the full range and
-  eth_getProof at the chosen block.
+  Anything else — mismatch, no transitions, unsupported proof shape — is
+  nonzero. Needs an endpoint that serves eth_getLogs (scanned in --log-range
+  chunks, so a per-call range cap is fine) and eth_getProof at the chosen block.
 
   The observation block is an observation point, not part of the claim. Most
   endpoints serve eth_getProof only within a recent window, so --block with an
@@ -65,10 +65,11 @@ LIMITATIONS, STATED PLAINLY
 
   * The trie walker is minimal. It handles branch, extension and leaf nodes
     referenced by hash, validates hex-prefix flags and padding, and RAISES on
-    anything else â€” including inlined (<32 byte) node references â€” rather than
+    anything else — including inlined (<32 byte) node references — rather than
     guessing. An unsupported proof shape is an error, never a silent pass.
   * The header reconstruction covers the post-merge field set through the
-    Prague fork. A future fork that appends header fields will fail the hash
+    Prague fork, plus blockAccessListHash and slotNumber as Sepolia now serves
+    them. A future fork that appends header fields will fail the hash
     check until the field list here is extended; that failure is loud.
   * Storage slot layout is taken from the reference AgentMemoryStateRegistry:
     `_spaces` at slot 0, SpaceRecord = {controller, authorizer, transitionId,
@@ -78,12 +79,12 @@ LIMITATIONS, STATED PLAINLY
   * Spaces are enumerated from TransitionCommitted logs. A Space registered
     but never advanced has no transitions to check and does not appear.
   * This checks the state machine. It says nothing about whether committed
-    memory is available, truthful, or meaningful â€” ERC-8350 is explicit about
+    memory is available, truthful, or meaningful — ERC-8350 is explicit about
     those being out of scope.
 
 Companion to the ERC-8312 reference implementation in this repository. That
 code implements meterable invariants in Solidity; this script is what checking
-such an invariant from outside looks like â€” here applied to ERC-8350's public
+such an invariant from outside looks like — here applied to ERC-8350's public
 deployment, whose transition rule is the same shape one layer up.
 """
 
@@ -126,7 +127,7 @@ def k256(data: bytes) -> bytes:
 EXPERIENCE_DELTA_TYPEHASH = k256(EXPERIENCE_DELTA_TYPE)
 MEMORY_STATE_TYPEHASH = k256(MEMORY_STATE_TYPE)
 
-# keccak256(rlp(b"")) â€” the root of an empty trie.
+# keccak256(rlp(b"")) — the root of an empty trie.
 EMPTY_TRIE_ROOT = bytes.fromhex(
     "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
@@ -216,7 +217,7 @@ def verify_proof(root: bytes, key: bytes, proof) -> bytes:
 
     Returns the RLP-encoded value stored at the key, or b"" if the key is
     proven absent. Raises ValueError on any malformed, unsupported, or
-    non-matching proof â€” never guesses.
+    non-matching proof — never guesses.
     """
     path = _nibbles(k256(key))
     depth = 0
@@ -287,8 +288,9 @@ def verify_slot(storage_root: bytes, slot: int, slot_proof) -> int:
 
 
 # ----------------------------------------------------------------- block header
-# Execution-layer header fields, post-merge through Prague. Optional fields are
-# appended in fork order; presence is taken from the RPC response.
+# Execution-layer header fields, post-merge through Prague, then
+# blockAccessListHash and slotNumber. Optional fields are appended in fork
+# order; presence is taken from the RPC response.
 _HEADER_REQUIRED = [
     ("parentHash", bytes), ("sha3Uncles", bytes), ("miner", bytes),
     ("stateRoot", bytes), ("transactionsRoot", bytes), ("receiptsRoot", bytes),
@@ -334,7 +336,7 @@ def verify_header(block: dict):
     if computed != reported:
         raise ValueError(
             f"header reconstruction mismatch: computed {hexs(computed)}, "
-            f"endpoint reports {hexs(reported)} â€” lying endpoint or a header "
+            f"endpoint reports {hexs(reported)} — lying endpoint or a header "
             f"shape newer than this script")
     return reported, bytes.fromhex(block["stateRoot"][2:])
 
@@ -449,7 +451,7 @@ def prove_head(rpc, registry, space_id, block, state_root, base_slot):
     Every returned value comes from this side's walk of the submitted proof
     nodes: the requested slot list is authoritative, each response entry's key
     must equal the requested slot, and the walked value must equal the value
-    the endpoint reported â€” any disagreement raises.
+    the endpoint reported — any disagreement raises.
     """
     base = int.from_bytes(k256(word(space_id) + word(base_slot)), "big")
     names = ["controller", "authorizer", "transitionId", "stateRoot", "seqNonce"]
