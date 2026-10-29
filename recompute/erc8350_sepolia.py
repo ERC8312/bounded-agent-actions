@@ -375,12 +375,15 @@ class Rpc:
 
 
 # ----------------------------------------------------------------------- main
-def collect_spaces(rpc, registry, from_block=0, log_range=45000):
+def collect_spaces(rpc, registry, from_block=0, log_range=45000, to_block=None):
     latest = int(rpc("eth_blockNumber", []), 16)
+    upper = latest if to_block is None else min(to_block, latest)
+    if from_block > upper:
+        return 0, {}
     logs = []
     start = from_block
-    while start <= latest:
-        end = min(start + log_range - 1, latest)
+    while start <= upper:
+        end = min(start + log_range - 1, upper)
         logs.extend(rpc("eth_getLogs", [{
             "address": registry,
             "topics": [TRANSITION_COMMITTED_TOPIC],
@@ -510,16 +513,23 @@ def main():
                     help="second endpoint that must report the same block hash "
                          "and state root")
     args = ap.parse_args()
+    if args.log_range <= 0:
+        ap.error("--log-range must be a positive integer")
+    if args.from_block < 0:
+        ap.error("--from-block must be >= 0")
+    if args.block is not None and args.block < 0:
+        ap.error("--block must be >= 0")
 
     rpc = Rpc(args.rpc_url)
     registry = args.registry
 
-    log_count, spaces = collect_spaces(rpc, registry, args.from_block, args.log_range)
+    block_number = args.block if args.block is not None else \
+        int(rpc("eth_blockNumber", []), 16) - 12
+    log_count, spaces = collect_spaces(
+        rpc, registry, args.from_block, args.log_range, block_number)
     print(f"registry            {registry}")
     print(f"TransitionCommitted {log_count} logs across {len(spaces)} Memory Spaces")
 
-    block_number = args.block if args.block is not None else \
-        int(rpc("eth_blockNumber", []), 16) - 12
     block = rpc("eth_getBlockByNumber", [hex(block_number), False])
     if block is None:
         print(f"block {block_number} not available from this endpoint")
