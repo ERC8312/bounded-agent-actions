@@ -24,8 +24,13 @@ jobs:
 
   recompute:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -34,5 +39,42 @@ jobs:
       - name: Install replay dependency
         run: python -m pip install pycryptodome==3.23.0
 
-      - name: Replay unit tests
-        run: python -m unittest discover -s recompute -p 'test_*.py' -v
+      - name: Install signature cross-check tool
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Record toolchain and require cast
+        run: |
+          mkdir -p artifacts/erc8350-client
+          python --version > artifacts/erc8350-client/toolchain.txt
+          python -m pip show pycryptodome >> artifacts/erc8350-client/toolchain.txt
+          cast --version >> artifacts/erc8350-client/toolchain.txt
+
+      - name: Replay unit tests (no skips)
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee artifacts/erc8350-client/unit-tests.log
+          import sys
+          import unittest
+          suite = unittest.defaultTestLoader.discover("recompute", pattern="test_*.py")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          print(f"Strict CI: tests={result.testsRun}, skipped={len(result.skipped)}")
+          sys.exit(0 if result.wasSuccessful() and result.testsRun > 0 and not result.skipped else 1)
+          PY
+
+      - name: Export scoped client results and public test signatures
+        run: |
+          python recompute/erc8350_client.py \
+            --json artifacts/erc8350-client/result.json \
+            --emit-signature-vectors artifacts/erc8350-client/signature-vectors.json
+
+      - name: Upload reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: erc8350-client-${{ github.sha }}
+          path: artifacts/erc8350-client/
+          if-no-files-found: error
+          retention-days: 90
